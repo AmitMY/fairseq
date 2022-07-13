@@ -6,10 +6,11 @@ from typing import Dict, List
 from dataclasses import dataclass, field
 
 from fairseq.data.encoders import register_bpe
-from .subword_nmt_bpe import SubwordNMTBPE, SubwordNMTBPEConfig
 
 import numpy as np
 import itertools as it
+
+from fairseq.data.encoders.subword_nmt_bpe import SubwordNMTBPE, SubwordNMTBPEConfig
 
 
 class OptimalBPETokenizer:
@@ -45,14 +46,16 @@ class OptimalBPETokenizer:
                         𝜷[m, 1] = 𝜷[n, 1] + self.vocabulary[segment]
                         bp[m] = n
                     elif 𝜷[m, 0] == 𝜷[n, 0] + 1:
-                        𝜷[m, 1] = max(𝜷[m, 1], 𝜷[n, 1] + self.vocabulary[segment])
-                        bp[m] = n
+                        if 𝜷[n, 1] + self.vocabulary[segment] > 𝜷[m, 1]:
+                            𝜷[m, 1] = 𝜷[n, 1] + self.vocabulary[segment]
+                            bp[m] = n
 
         # extract backpointers
         ptr = N
         segmentation = []
         while ptr != 0:
-            segmentation = [word[bp[ptr]:ptr]] + segmentation
+            last_bp = bp[ptr]
+            segmentation = [word[last_bp:ptr]] + segmentation
             ptr = bp[ptr]
 
         # make sure we didn't fuck it
@@ -68,17 +71,22 @@ class OptimalBPETokenizer:
         if not self.dropout and word in self.cache:
             return self.cache[word]
 
+        for c in word:
+            if c not in self.vocabulary:
+                self.vocabulary[c] = self.vocabulary[c + ' '] = 1
+        self.vocabulary[' '] = 0
+
         self.cache[word], _, _ = self.semi_markov_segment(word, dropout=self.dropout)
         return self.cache[word]
 
     def segment_words(self, words: List[str], dropout=0) -> List[str]:
         """segment a sequence of words with BPE encoding"""
         for word in words:
-            segments = self.segment_word(word)
+            segments = self.segment_word(word + ' ')
             for segment in segments[:-1]:
                 yield segment + self.separator
 
-            yield segments[-1]
+            yield segments[-1].rstrip()
 
     def segment(self, sentence: str):
         """segmenta  single sentence (whitespace-tokenized string) with BPE encoding"""
@@ -135,14 +143,9 @@ class OptimalBPE(SubwordNMTBPE):
 
         self.tokenizer = OptimalBPETokenizer(self.get_vocabulary(), self.bpe.separator)
 
-    def get_vocabulary(self, whitespace_token='✡'):
+    def get_vocabulary(self):
         vocabulary = {b + p: 1 / (f + 1) for (b, p), f in self.bpe.bpe_codes.items()}
-        vocabulary = {k.replace('</w>', whitespace_token): v for k, v in vocabulary.items()}
-        # Vocabulary does not include single characters, or single characters with whitespace token!
-        for w in list(vocabulary.keys()):
-            for c in w:
-                vocabulary[c] = vocabulary[c + whitespace_token] = 0
-
+        vocabulary = {k.replace('</w>', ' '): v for k, v in vocabulary.items()}
         return vocabulary
 
     def encode(self, x: str) -> str:
