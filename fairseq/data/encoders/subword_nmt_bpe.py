@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 from fairseq import file_utils
 from fairseq.data.encoders import register_bpe
@@ -12,8 +13,9 @@ from fairseq.dataclass import FairseqDataclass
 
 @dataclass
 class SubwordNMTBPEConfig(FairseqDataclass):
-    bpe_codes: str = field(default="???", metadata={"help": "path to subword NMT BPE"})
+    bpe_codes: str = field(default="???", metadata={"help": "path to subword NMT BPE codes"})
     bpe_separator: str = field(default="@@", metadata={"help": "BPE separator"})
+    bpe_vocab: Optional[str] = field(default=None, metadata={"help": "path to subword NMT BPE vocab"})
 
 
 @register_bpe("subword_nmt", dataclass=SubwordNMTBPEConfig)
@@ -26,19 +28,21 @@ class SubwordNMTBPE(object):
             from subword_nmt import apply_bpe
 
             bpe_parser = apply_bpe.create_parser()
-            bpe_args = bpe_parser.parse_args(
-                [
-                    "--codes",
-                    codes,
-                    "--separator",
-                    cfg.bpe_separator,
-                ]
-            )
+            bpe_raw_args = [
+                "--codes",
+                codes,
+                "--separator",
+                cfg.bpe_separator,
+            ]
+            if cfg.bpe_vocab is not None:
+                bpe_raw_args.append("--vocabulary")
+                bpe_raw_args.append(cfg.bpe_vocab)
+            bpe_args = bpe_parser.parse_args(bpe_raw_args)
             self.bpe = apply_bpe.BPE(
                 bpe_args.codes,
                 bpe_args.merges,
                 bpe_args.separator,
-                None,
+                bpe_args.vocabulary,
                 bpe_args.glossaries,
             )
             self.bpe_symbol = bpe_args.separator + " "
